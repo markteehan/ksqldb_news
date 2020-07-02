@@ -3,6 +3,7 @@
 #You must allocate a minimum of 8 GB of Docker memory resource. The default memory allocation on Docker Desktop for Mac is 2 GB and must be changed.
 P_GITHUB_REPO=markteehan
 
+export TERM=ansi
 export DT=`date "+%Y%m%d-%H%M%S"`
 export DT2=`date "+%H%m%S"`
 
@@ -123,7 +124,7 @@ echo "copy GDELT_EVENT FROM ...<<csv file>>"
 docker-compose    exec postgres bash -c "psql -U postgres postgres -c \"\\copy GDELT_EVENT FROM '/var/tmp/${FILE}' WITH delimiter E'\t' null as ';' \" "
 echo "SELECT count(*) from GDELT_EVENT FROM GDELT_EVENT"
 docker-compose    exec postgres bash -c "psql -U postgres postgres -c \"SELECT count(*) from GDELT_EVENT;\" "
-Pause
+
 
 echo;echo;echo ">======" ; echo "Create a topic for the news story messages"
 echo "This code is here: https://github.com/markteehan/ksqldb_news"
@@ -135,7 +136,6 @@ cat <<EOF >/tmp/cmd.sql
 CREATE SOURCE CONNECTOR source_jdbc_gdelt_event WITH ('connector.class'='io.confluent.connect.jdbc.JdbcSourceConnector', 'connection.url'='jdbc:postgresql://postgres:5432/postgres?user=postgres&password=postgres', 'mode'='incrementing','incrementing.column.name'='eventid', 'topic.prefix'='GDE_000_','table.whitelist'='gdelt_event','numeric.mapping'='best_fit','schema.pattern'='public');
 EOF
 runSQL
-Pause
 
 echo;echo;echo ">======" ; echo "Show Connectors"
 echo "This code is here: https://github.com/markteehan/ksqldb_news"
@@ -143,7 +143,6 @@ cat <<EOF >/tmp/cmd.sql
 SHOW CONNECTORS;
 EOF
 runSQL
-Pause
 
 echo;echo;echo ">======" ; echo "create a ksqlDB STREAM over the topic. The postgres table schema was automatically registered"
 echo "in the Confluent Schema Registry"
@@ -151,7 +150,6 @@ cat <<EOF >/tmp/cmd.sql
 CREATE STREAM GDE_A010_STR WITH (kafka_topic='GDE_000_gdelt_event',value_format='avro',partitions=1,replicas=1);
 EOF
 runSQL
-Pause
 
 echo;echo;echo ">======" ; echo "Transform: improve the message format. Reduce the column count from 61 to 23 by defining STRUCT's using STRUCT()."
 echo "This code is here: https://github.com/markteehan/ksqldb_news"
@@ -163,6 +161,14 @@ CREATE STREAM GDE_A020_STR WITH (kafka_topic='GDE_A020_STR', value_format='avro'
 , MONTHYEAR 
 , YEAR 
 , FRACTIONDATE 
+, case    
+    when ACTOR1NAME>'' and ACTOR2NAME>'' AND ACTOR1NAME>ACTOR2NAME THEN CONCAT(CONCAT(ACTOR2NAME,'-'),ACTOR1NAME)   
+    when ACTOR1NAME>'' and ACTOR2NAME>'' AND ACTOR2NAME>ACTOR1NAME THEN CONCAT(CONCAT(ACTOR1NAME,'-'),ACTOR2NAME)   
+    when ACTOR2NAME>'' and ACTOR1NAME>'' AND ACTOR1NAME=ACTOR2NAME THEN ACTOR1NAME   
+    when ACTOR1NAME>'' and ACTOR2NAME='' THEN ACTOR1NAME   
+    when ACTOR2NAME>'' and ACTOR1NAME='' THEN ACTOR2NAME   
+    when ACTOR1NAME='' and ACTOR2NAME='' THEN 'untagged'   
+  end STORY_ACTORS   
 , ARRAY [ 
   STRUCT (CODE:=ACTOR1CODE, NAME:=ACTOR1NAME, COUNTRYCODE:=ACTOR1COUNTRYCODE, KNOWNGROUPCODE:=ACTOR1KNOWNGROUPCODE, ETHNICCODE:=ACTOR1ETHNICCODE, RELIGION1CODE:=ACTOR1RELIGION1CODE, RELIGION2CODE:=ACTOR1RELIGION2CODE, TYPE1CODE:=ACTOR1TYPE1CODE, TYPE2CODE:=ACTOR1TYPE2CODE, TYPE3CODE:=ACTOR1TYPE3CODE) 
 , STRUCT (CODE:=ACTOR2CODE, NAME:=ACTOR2NAME, COUNTRYCODE:=ACTOR2COUNTRYCODE, KNOWNGROUPCODE:=ACTOR2KNOWNGROUPCODE, ETHNICCODE:=ACTOR2ETHNICCODE, RELIGION1CODE:=ACTOR2RELIGION1CODE, RELIGION2CODE:=ACTOR2RELIGION2CODE, TYPE1CODE:=ACTOR2TYPE1CODE, TYPE2CODE:=ACTOR2TYPE2CODE, TYPE3CODE:=ACTOR2TYPE3CODE) 
@@ -191,44 +197,38 @@ PARTITION BY URL_EXTRACT_HOST(SOURCEURL);
 EOF
 cat /tmp/cmd.sql
 runSQL
-Pause
 
 
 
 echo;echo;echo ">======" ; echo "build a streaming application using a ksqlDB table"
 echo "This code is here: https://github.com/markteehan/ksqldb_news"
-echo "1. Count the number of news stories for each SITE"
+echo "1. Count the number of news stories for each STORY_ACTORS"
 echo "2. Bucket the tone of eact story as VERYNEG / NEGATIVE / NEUTRAL / POSITIVE / VERYPOSITIVE"
 echo "3. As messages stream, maintain a count of the stories in each Bucket"
+echo " "
 echo "This is quite complex logic in 14 lines of SQL"
 
 cat <<EOF >/tmp/cmd.sql
 CREATE TABLE GDE_D030_TAB WITH (kafka_topic='GDE_D030_TAB' ,  value_format='avro' , partitions=1 , replicas=1) AS 
 SELECT
- SITE SITE_KEY
-,LATEST_BY_OFFSET(SITE) as SITE
+ STORY_ACTORS STORY_ACTORS_KEY
+,LATEST_BY_OFFSET(STORY_ACTORS) as STORY_ACTORS
 ,COUNT(CASE WHEN AVGTONE BETWEEN -0.5 and  0.5 THEN 1 ELSE null END) NEUTRAL
 ,COUNT(CASE WHEN AVGTONE BETWEEN -5.0 and -0.5 THEN 1 ELSE null END) NEGATIVE
 ,COUNT(CASE WHEN AVGTONE <       -5.0          THEN 1 ELSE null END) VERYNEG
 ,COUNT(CASE WHEN AVGTONE BETWEEN  0.5 and  5.0 THEN 1 ELSE null END) POSITIVE
 ,COUNT(CASE WHEN AVGTONE >        5.0          THEN 1 ELSE null END) VERYPOS
-,WINDOWSTART
-,WINDOWEND
+,WINDOWSTART as WINDOW_START
+,WINDOWEND   as WINDOW_END
 FROM GDE_A020_STR
 WINDOW TUMBLING (SIZE 120 SECONDS)
-GROUP BY SITE;
+GROUP BY STORY_ACTORS;
 EOF
 cat cmd.sql
 runSQL
-Pause
+
 
 
 echo;echo;echo ">======" ; echo "query the table"
-echo "This code is here: https://github.com/markteehan/ksqldb_news"
-cat <<EOF >/tmp/cmd.sql
-select * from  GDE_D030_TAB WITH EMIT CHANGES;
-EOF
-cat cmd.sql
-runSQL
-
+echo select STORY_ACTORS,VERYNEG,NEGATIVE,NEUTRAL,POSITIVE,VERYPOS from  GDE_D030_TAB EMIT CHANGES;
 
