@@ -1,0 +1,224 @@
+# Start Confluent Platform specifying two options: (-d) to run in detached mode and (--build) 
+#to build the Kafka Connect image with the source connector kafka-connect-datagen from Confluent Hub.
+#You must allocate a minimum of 8 GB of Docker memory resource. The default memory allocation on Docker Desktop for Mac is 2 GB and must be changed.
+P_GITHUB_REPO=markteehan
+
+export DT=`date "+%Y%m%d-%H%M%S"`
+export DT2=`date "+%H%m%S"`
+
+if [ "$1" = "--interactive" ]
+then
+  INTERACTIVE=Y
+fi
+INTERACTIVE=Y
+
+run()
+{
+ clear
+ echo;echo $1
+}
+
+
+runSQL()
+{
+  echo "set 'auto.offset.reset'='earliest'; " > /tmp/cmda.sql
+  cat /tmp/cmda.sql /tmp/cmd.sql > /tmp/cmdb.sql
+  echo;echo;echo "<<<<<<<<<<<<<<<"
+  cat /tmp/cmd.sql
+  docker cp /tmp/cmdb.sql ksqldb-cli:/tmp/cmd.sql
+  docker exec -it ksqldb-cli bash -c "ksql http://ksqldb:8088 < /tmp/cmd.sql"
+  echo ">>>>>>>>>>>>>>>";echo;echo;echo
+  echo;echo "Paused. Hit <return> to continue"
+  read Pause
+}
+
+runDynamicSQL()
+{
+  echo "set 'auto.offset.reset'='earliest'; " > /tmp/cmda.sql
+  cat /tmp/cmda.sql /tmp/cmd.sql > /tmp/cmdb.sql
+  docker cp /tmp/cmdb.sql ksqldb-cli:/tmp/cmd.sql
+  docker exec -it ksqldb-cli bash -c "ksql --output JSON http://ksqldb:8088 < /tmp/cmd.sql"  > /tmp/out.sql
+  cat /tmp/out.sql | sed 's/|//g' > /tmp/out.sql.A
+  cat /tmp/out.sql.A | sed "s/#/'/g" > /tmp/out.sql.B
+  cat /tmp/out.sql.B
+  Pause
+}
+
+Pause()
+{
+  if [ "$INTERACTIVE" = "Y" ]
+  then
+    echo;echo "Paused. Hit <return> to continue"
+    read Pause
+    clear
+    echo;echo
+  else
+    echo "Sleeping for 30 seconds before running the next cmd..."
+    sleep 30
+    echo;echo;echo;echo "=================================================================="
+  fi
+  
+}
+
+
+autogenStreams()
+{
+cat <<EOF >/tmp/cmd.sql
+SELECT 'create stream st_'+replace(SITE,'.','_') + ' with (kafka_topic=#st_'+replace(SITE,'.','_')+'#,value_format=#avro#,partitions=1) AS SELECT * FROM  GDE_A021_STR  WHERE SITE = #'+SITE+'#;' as cmd
+  FROM GDE_D020_TAB_SITE
+  emit changes LIMIT 100;
+EOF
+runSQL
+}
+
+
+if [ "$INTERACTIVE" = "Y" ]
+then
+  echo " "
+else
+  echo;echo;echo "Sleeping for 2 mins to enable all containers to start"
+  echo "After 120 seconds the remaining steps will run automatically"
+  sleep 120
+  clear
+  Pause
+fi
+
+
+clear
+echo ""
+echo ""
+echo "See https://github.com/confluentinc/examples for ~25 Kafka demos"
+echo " "
+echo "  data.gdelt.com                          |_______|"
+echo "  ==============                          | Kafka |"
+echo "        |                   |----|        |Connect|       O O"
+echo "        |     csv files     |post|        | JDBC  |       |/                  CREATE SOURCE CONNECTOR source_jdbc_gdelt_event"
+echo "        --------------------|gres|---------->>>>>-------  O-O  -- [ksqldb] -- SHOW CONNECTORS"
+echo "                            |----|        |Source |       |\                  CREATE STREAM GDE_A010_STR"
+echo "                                          |_______|       O O                 CREATE STREAM GDE_A020_STR AS SELECT FROM GDE_A010_STR"
+echo "                                                                              CREATE TABLE GDE_D030_TAB AS SELECT FROM GDE_A020_STR"
+echo "Check status - is everything up?"
+docker-compose up --detach 
+Pause
+
+echo;echo;echo ">======" ; echo "Truncate, drop, create table in postgres"
+docker-compose -f docker-compose.yml  exec postgres bash -c "psql -U postgres postgres -c \"DROP TABLE GDELT_EVENT; \" "
+docker-compose -f docker-compose.yml  exec postgres bash -c "psql -U postgres postgres -c \" CREATE TABLE IF NOT EXISTS GDELT_EVENT (TS VARCHAR, EVENTID BIGINT NOT NULL, EVENT_DATE VARCHAR(500) , MONTHYEAR VARCHAR(500) , YEAR VARCHAR(500) , FRACTIONDATE VARCHAR(500) , ACTOR1CODE VARCHAR(500), ACTOR1NAME VARCHAR(500), ACTOR1COUNTRYCODE VARCHAR(500), ACTOR1KNOWNGROUPCODE VARCHAR(500), ACTOR1ETHNICCODE VARCHAR(500), ACTOR1RELIGION1CODE VARCHAR(500), ACTOR1RELIGION2CODE VARCHAR(500), ACTOR1TYPE1CODE VARCHAR(500), ACTOR1TYPE2CODE VARCHAR(500), ACTOR1TYPE3CODE VARCHAR(500), ACTOR2CODE VARCHAR(500), ACTOR2NAME VARCHAR(500), ACTOR2COUNTRYCODE VARCHAR(500), ACTOR2KNOWNGROUPCODE VARCHAR(500), ACTOR2ETHNICCODE VARCHAR(500), ACTOR2RELIGION1CODE VARCHAR(500), ACTOR2RELIGION2CODE VARCHAR(500), ACTOR2TYPE1CODE VARCHAR(500), ACTOR2TYPE2CODE VARCHAR(500), ACTOR2TYPE3CODE VARCHAR(500), ISROOTEVENT VARCHAR(500) , EVENTCODE VARCHAR(500), EVENTBASECODE VARCHAR(500), EVENTROOTCODE VARCHAR(500), QUADCLASS VARCHAR(500) , GOLDSTEINSCALE VARCHAR(500) , NUMMENTIONS VARCHAR(500) , NUMSOURCES VARCHAR(500) , NUMARTICLES INTEGER , AVGTONE FLOAT, ACTOR1GEO_TYPE VARCHAR(500) , ACTOR1GEO_FULLNAME VARCHAR(500), ACTOR1GEO_COUNTRYCODE VARCHAR(500), ACTOR1GEO_ADM1CODE VARCHAR(500),ACTOR1GEO_ADM2CODE VARCHAR(500), ACTOR1GEO_LAT VARCHAR(500) , ACTOR1GEO_LONG VARCHAR(500) , ACTOR1GEO_FEATUREID VARCHAR(500), ACTOR2GEO_TYPE VARCHAR(10), ACTOR2GEO_FULLNAME VARCHAR(500), ACTOR2GEO_COUNTRYCODE VARCHAR(500), ACTOR2GEO_ADM1CODE VARCHAR(500),ACTOR2GEO_ADM2CODE VARCHAR(500), ACTOR2GEO_LAT VARCHAR(500) , ACTOR2GEO_LONG VARCHAR(500) , ACTOR2GEO_FEATUREID VARCHAR(500), ACTIONGEO_TYPE VARCHAR(500), ACTIONGEO_FULLNAME VARCHAR(500), ACTIONGEO_COUNTRYCODE VARCHAR(500), ACTIONGEO_ADM1CODE VARCHAR(500),ACTIONGEO_ADM2CODE VARCHAR(500), ACTIONGEO_LAT VARCHAR(500), ACTIONGEO_LONG VARCHAR(500), ACTIONGEO_FEATUREID VARCHAR(500), DATEADDED VARCHAR(200), SOURCEURL VARCHAR(5000));\" "
+Pause
+
+FILE=20190712181500.export.csv
+echo "Loading  data/gdelt/${FILE} into postgres ..."
+TS=`echo $FILE|awk -F\. '{print $1}'`
+cp data/gdelt/${FILE} /tmp/${FILE}
+cat /tmp/${FILE} | sed "s/^/${TS}	/" > /tmp/${FILE}.1
+
+docker cp /tmp/${FILE}.1 postgres:/var/tmp/${FILE}
+echo "delete from GDELT_EVENT;"
+docker-compose    exec postgres bash -c "psql -U postgres postgres -c \"delete from GDELT_EVENT; \" "
+echo "copy GDELT_EVENT FROM ...<<csv file>>"
+docker-compose    exec postgres bash -c "psql -U postgres postgres -c \"\\copy GDELT_EVENT FROM '/var/tmp/${FILE}' WITH delimiter E'\t' null as ';' \" "
+echo "SELECT count(*) from GDELT_EVENT FROM GDELT_EVENT"
+docker-compose    exec postgres bash -c "psql -U postgres postgres -c \"SELECT count(*) from GDELT_EVENT;\" "
+Pause
+
+echo;echo;echo ">======" ; echo "Create a topic for the news story messages"
+docker-compose exec kafka1 kafka-topics --bootstrap-server kafka1:9092 --topic GDE_000_gdelt_event --create --replication-factor 1 --config retention.ms=-1
+
+echo;echo;echo ">======" ; echo "Create a source connector to SELECT from Postgres into a kafka topic"
+cat <<EOF >/tmp/cmd.sql
+CREATE SOURCE CONNECTOR source_jdbc_gdelt_event WITH ('connector.class'='io.confluent.connect.jdbc.JdbcSourceConnector', 'connection.url'='jdbc:postgresql://postgres:5432/postgres?user=postgres&password=postgres', 'mode'='incrementing','incrementing.column.name'='eventid', 'topic.prefix'='GDE_000_','table.whitelist'='gdelt_event','numeric.mapping'='best_fit','schema.pattern'='public');
+EOF
+runSQL
+Pause
+
+echo;echo;echo ">======" ; echo "Show Connectors"
+cat <<EOF >/tmp/cmd.sql
+SHOW CONNECTORS;
+EOF
+runSQL
+Pause
+
+echo;echo;echo ">======" ; echo "create a ksqlDB STREAM over the topic. The postgres table schema was automatically registered"
+echo "in the Confluent Schema Registry"
+cat <<EOF >/tmp/cmd.sql
+CREATE STREAM GDE_A010_STR WITH (kafka_topic='GDE_000_gdelt_event',value_format='avro',partitions=1,replicas=1);
+EOF
+runSQL
+Pause
+
+echo;echo;echo ">======" ; echo "Transform: improve the message format. Reduce the column count from 61 to 23 by defining STRUCT's using STRUCT()."
+cat <<EOF >/tmp/cmd.sql
+CREATE STREAM GDE_A020_STR WITH (kafka_topic='GDE_A020_STR', value_format='avro',partitions=1,replicas=1) AS SELECT 
+  TS 
+, EVENTID 
+, EVENT_DATE 
+, MONTHYEAR 
+, YEAR 
+, FRACTIONDATE 
+, ARRAY [ 
+  STRUCT (CODE:=ACTOR1CODE, NAME:=ACTOR1NAME, COUNTRYCODE:=ACTOR1COUNTRYCODE, KNOWNGROUPCODE:=ACTOR1KNOWNGROUPCODE, ETHNICCODE:=ACTOR1ETHNICCODE, RELIGION1CODE:=ACTOR1RELIGION1CODE, RELIGION2CODE:=ACTOR1RELIGION2CODE, TYPE1CODE:=ACTOR1TYPE1CODE, TYPE2CODE:=ACTOR1TYPE2CODE, TYPE3CODE:=ACTOR1TYPE3CODE) 
+, STRUCT (CODE:=ACTOR2CODE, NAME:=ACTOR2NAME, COUNTRYCODE:=ACTOR2COUNTRYCODE, KNOWNGROUPCODE:=ACTOR2KNOWNGROUPCODE, ETHNICCODE:=ACTOR2ETHNICCODE, RELIGION1CODE:=ACTOR2RELIGION1CODE, RELIGION2CODE:=ACTOR2RELIGION2CODE, TYPE1CODE:=ACTOR2TYPE1CODE, TYPE2CODE:=ACTOR2TYPE2CODE, TYPE3CODE:=ACTOR2TYPE3CODE) 
+  ] AS ACTOR_STRUCT 
+, ISROOTEVENT 
+, EVENTCODE 
+, EVENTBASECODE 
+, EVENTROOTCODE 
+, QUADCLASS 
+, GOLDSTEINSCALE 
+, NUMMENTIONS 
+, NUMSOURCES 
+, NUMARTICLES 
+, AVGTONE 
+, ARRAY [ 
+  STRUCT (TYPE:=ACTOR1GEO_TYPE, FULLNAME:=ACTOR1GEO_FULLNAME, COUNTRYCODE:=ACTOR1GEO_COUNTRYCODE, ADM1CODE:=ACTOR1GEO_ADM1CODE, ADM2CODE:=ACTOR1GEO_ADM2CODE, LAT:=ACTOR1GEO_LAT, LONG:=ACTOR1GEO_LONG, FEATUREID:=ACTOR1GEO_FEATUREID) 
+, STRUCT (TYPE:=ACTOR2GEO_TYPE, FULLNAME:=ACTOR2GEO_FULLNAME, COUNTRYCODE:=ACTOR2GEO_COUNTRYCODE, ADM1CODE:=ACTOR2GEO_ADM1CODE, ADM2CODE:=ACTOR2GEO_ADM2CODE, LAT:=ACTOR2GEO_LAT, LONG:=ACTOR2GEO_LONG, FEATUREID:=ACTOR2GEO_FEATUREID) 
+, STRUCT (TYPE:=ACTIONGEO_TYPE, FULLNAME:=ACTIONGEO_FULLNAME, COUNTRYCODE:=ACTIONGEO_COUNTRYCODE, ADM1CODE:=ACTIONGEO_ADM1CODE, ADM2CODE:=ACTIONGEO_ADM2CODE, LAT:=ACTIONGEO_LAT, LONG:=ACTIONGEO_LONG, FEATUREID:=ACTIONGEO_FEATUREID) 
+  ] AS GEOTYPE_STRUCT 
+, DATEADDED 
+, SOURCEURL 
+, URL_EXTRACT_HOST(SOURCEURL) as SITE
+, URL_EXTRACT_PATH(SOURCEURL) as URLPATH
+FROM GDE_A010_STR
+PARTITION BY URL_EXTRACT_HOST(SOURCEURL);
+EOF
+cat /tmp/cmd.sql
+runSQL
+Pause
+
+
+
+echo;echo;echo ">======" ; echo "build a streaming application using a ksqlDB table"
+echo "1. Count the number of news stories for each SITE"
+echo "2. Bucket the tone of eact story as VERYNEG / NEGATIVE / NEUTRAL / POSITIVE / VERYPOSITIVE"
+echo "3. As messages stream, maintain a count of the stories in each Bucket"
+echo "This is quite complex logic in 14 lines of SQL"
+
+cat <<EOF >/tmp/cmd.sql
+CREATE TABLE GDE_D030_TAB WITH (kafka_topic='GDE_D030_TAB' ,  value_format='avro' , partitions=1 , replicas=1) AS 
+SELECT
+ SITE SITE_KEY
+,LATEST_BY_OFFSET(SITE) as SITE
+,COUNT(CASE WHEN AVGTONE BETWEEN -0.5 and  0.5 THEN 1 ELSE null END) NEUTRAL
+,COUNT(CASE WHEN AVGTONE BETWEEN -5.0 and -0.5 THEN 1 ELSE null END) NEGATIVE
+,COUNT(CASE WHEN AVGTONE <       -5.0          THEN 1 ELSE null END) VERYNEG
+,COUNT(CASE WHEN AVGTONE BETWEEN  0.5 and  5.0 THEN 1 ELSE null END) POSITIVE
+,COUNT(CASE WHEN AVGTONE >        5.0          THEN 1 ELSE null END) VERYPOS
+,WINDOWSTART
+,WINDOWEND
+FROM GDE_A020_STR
+WINDOW TUMBLING (SIZE 120 SECONDS)
+GROUP BY SITE;
+EOF
+cat cmd.sql
+runSQL
+Pause
+
+
+echo;echo;echo ">======" ; echo "query the table"
+cat <<EOF >/tmp/cmd.sql
+select * from  GDE_D030_TAB WITH EMIT CHANGES;
+EOF
+cat cmd.sql
+runSQL
+
+
