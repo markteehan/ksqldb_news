@@ -102,6 +102,7 @@ docker-compose up --detach
 Pause
 
 echo;echo;echo ">======" ; echo "Truncate, drop, create table in postgres"
+echo "This code is here: https://github.com/markteehan/ksqldb_news"
 docker-compose -f docker-compose.yml  exec postgres bash -c "psql -U postgres postgres -c \"DROP TABLE GDELT_EVENT; \" "
 docker-compose -f docker-compose.yml  exec postgres bash -c "psql -U postgres postgres -c \" CREATE TABLE IF NOT EXISTS GDELT_EVENT (TS VARCHAR, EVENTID BIGINT NOT NULL, EVENT_DATE VARCHAR(500) , MONTHYEAR VARCHAR(500) , YEAR VARCHAR(500) , FRACTIONDATE VARCHAR(500) , ACTOR1CODE VARCHAR(500), ACTOR1NAME VARCHAR(500), ACTOR1COUNTRYCODE VARCHAR(500), ACTOR1KNOWNGROUPCODE VARCHAR(500), ACTOR1ETHNICCODE VARCHAR(500), ACTOR1RELIGION1CODE VARCHAR(500), ACTOR1RELIGION2CODE VARCHAR(500), ACTOR1TYPE1CODE VARCHAR(500), ACTOR1TYPE2CODE VARCHAR(500), ACTOR1TYPE3CODE VARCHAR(500), ACTOR2CODE VARCHAR(500), ACTOR2NAME VARCHAR(500), ACTOR2COUNTRYCODE VARCHAR(500), ACTOR2KNOWNGROUPCODE VARCHAR(500), ACTOR2ETHNICCODE VARCHAR(500), ACTOR2RELIGION1CODE VARCHAR(500), ACTOR2RELIGION2CODE VARCHAR(500), ACTOR2TYPE1CODE VARCHAR(500), ACTOR2TYPE2CODE VARCHAR(500), ACTOR2TYPE3CODE VARCHAR(500), ISROOTEVENT VARCHAR(500) , EVENTCODE VARCHAR(500), EVENTBASECODE VARCHAR(500), EVENTROOTCODE VARCHAR(500), QUADCLASS VARCHAR(500) , GOLDSTEINSCALE VARCHAR(500) , NUMMENTIONS VARCHAR(500) , NUMSOURCES VARCHAR(500) , NUMARTICLES INTEGER , AVGTONE FLOAT, ACTOR1GEO_TYPE VARCHAR(500) , ACTOR1GEO_FULLNAME VARCHAR(500), ACTOR1GEO_COUNTRYCODE VARCHAR(500), ACTOR1GEO_ADM1CODE VARCHAR(500),ACTOR1GEO_ADM2CODE VARCHAR(500), ACTOR1GEO_LAT VARCHAR(500) , ACTOR1GEO_LONG VARCHAR(500) , ACTOR1GEO_FEATUREID VARCHAR(500), ACTOR2GEO_TYPE VARCHAR(10), ACTOR2GEO_FULLNAME VARCHAR(500), ACTOR2GEO_COUNTRYCODE VARCHAR(500), ACTOR2GEO_ADM1CODE VARCHAR(500),ACTOR2GEO_ADM2CODE VARCHAR(500), ACTOR2GEO_LAT VARCHAR(500) , ACTOR2GEO_LONG VARCHAR(500) , ACTOR2GEO_FEATUREID VARCHAR(500), ACTIONGEO_TYPE VARCHAR(500), ACTIONGEO_FULLNAME VARCHAR(500), ACTIONGEO_COUNTRYCODE VARCHAR(500), ACTIONGEO_ADM1CODE VARCHAR(500),ACTIONGEO_ADM2CODE VARCHAR(500), ACTIONGEO_LAT VARCHAR(500), ACTIONGEO_LONG VARCHAR(500), ACTIONGEO_FEATUREID VARCHAR(500), DATEADDED VARCHAR(200), SOURCEURL VARCHAR(5000));\" "
 Pause
@@ -122,9 +123,11 @@ docker-compose    exec postgres bash -c "psql -U postgres postgres -c \"SELECT c
 Pause
 
 echo;echo;echo ">======" ; echo "Create a topic for the news story messages"
+echo "This code is here: https://github.com/markteehan/ksqldb_news"
 docker-compose exec kafka1 kafka-topics --bootstrap-server kafka1:9092 --topic GDE_000_gdelt_event --create --replication-factor 1 --config retention.ms=-1
 
 echo;echo;echo ">======" ; echo "Create a source connector to SELECT from Postgres into a kafka topic"
+echo "This code is here: https://github.com/markteehan/ksqldb_news"
 cat <<EOF >/tmp/cmd.sql
 CREATE SOURCE CONNECTOR source_jdbc_gdelt_event WITH ('connector.class'='io.confluent.connect.jdbc.JdbcSourceConnector', 'connection.url'='jdbc:postgresql://postgres:5432/postgres?user=postgres&password=postgres', 'mode'='incrementing','incrementing.column.name'='eventid', 'topic.prefix'='GDE_000_','table.whitelist'='gdelt_event','numeric.mapping'='best_fit','schema.pattern'='public');
 EOF
@@ -132,6 +135,7 @@ runSQL
 Pause
 
 echo;echo;echo ">======" ; echo "Show Connectors"
+echo "This code is here: https://github.com/markteehan/ksqldb_news"
 cat <<EOF >/tmp/cmd.sql
 SHOW CONNECTORS;
 EOF
@@ -147,6 +151,7 @@ runSQL
 Pause
 
 echo;echo;echo ">======" ; echo "Transform: improve the message format. Reduce the column count from 61 to 23 by defining STRUCT's using STRUCT()."
+echo "This code is here: https://github.com/markteehan/ksqldb_news"
 cat <<EOF >/tmp/cmd.sql
 CREATE STREAM GDE_A020_STR WITH (kafka_topic='GDE_A020_STR', value_format='avro',partitions=1,replicas=1) AS SELECT 
   TS 
@@ -188,6 +193,7 @@ Pause
 
 
 echo;echo;echo ">======" ; echo "build a streaming application using a ksqlDB table"
+echo "This code is here: https://github.com/markteehan/ksqldb_news"
 echo "1. Count the number of news stories for each SITE"
 echo "2. Bucket the tone of eact story as VERYNEG / NEGATIVE / NEUTRAL / POSITIVE / VERYPOSITIVE"
 echo "3. As messages stream, maintain a count of the stories in each Bucket"
@@ -215,6 +221,7 @@ Pause
 
 
 echo;echo;echo ">======" ; echo "query the table"
+echo "This code is here: https://github.com/markteehan/ksqldb_news"
 cat <<EOF >/tmp/cmd.sql
 select * from  GDE_D030_TAB WITH EMIT CHANGES;
 EOF
